@@ -88,6 +88,8 @@ static rbusHandle_t    udpst_rbus_handle = NULL;
 static int             g_async_instance = -1;
 static pthread_mutex_t g_async_lock     = PTHREAD_MUTEX_INITIALIZER;
 
+static time_t          g_async_start_time = 0;
+
 /* =========================================================================
  * Result cache — all TR-181 2.20.1 Output fields
  * Internal only — NOT exposed as device properties per spec
@@ -908,16 +910,25 @@ static int UDPST_Op_IPLayerCapacity(dm_req_t *req, kv_vector_t *in,
 
     /* Reject if a test is already running */
     pthread_mutex_lock(&g_async_lock);
-    if (g_async_instance >= 0) {
+if (g_async_instance >= 0) {
+    time_t now = time(NULL);
+    double elapsed = difftime(now, g_async_start_time);
+    if (elapsed > 120.0) {
         fprintf(stderr,
-                "[UDPST] test already running (inst=%d) — "
-                "reject new request\n", g_async_instance);
+                "[UDPST] stale async instance %d (%.0fs old) — "
+                "auto-resetting\n", g_async_instance, elapsed);
+        g_async_instance = -1;
+    } else {
+        fprintf(stderr,
+                "[UDPST] test already running (inst=%d, %.0fs) — "
+                "reject new request\n", g_async_instance, elapsed);
         pthread_mutex_unlock(&g_async_lock);
         return USP_ERR_COMMAND_FAILURE;
     }
-    g_async_instance = instance;
-    pthread_mutex_unlock(&g_async_lock);
-
+}
+g_async_instance   = instance;
+g_async_start_time = time(NULL);
+pthread_mutex_unlock(&g_async_lock);
     /* Reset result cache */
     pthread_mutex_lock(&g_result_lock);
     memset(&g_result, 0, sizeof(g_result));
